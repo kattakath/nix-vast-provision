@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # provision-lib.sh — the SHARED, never-false-positive ComfyUI provisioning engine.
 #
-# Single-sourced from nix-config (packages/vast-templates/provisioner/) and fetched
+# Single-sourced from nix-config (packages/templates/provisioner/) and fetched
 # at a PINNED flake rev by vast-bootstrap.sh (env PROVISION_LIB_URL), which drops it
 # on the instance and points PROVISION_LIB at it. A stack repo's provision.sh is then
 # THIN: `source "$PROVISION_LIB"`, declare the maps, call `comfyui_provision`. The

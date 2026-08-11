@@ -24,6 +24,10 @@ nix build .#packages.aarch64-darwin.vast-template-apply
   `nix flake check` instead.
 - Keep `orgName`/`repoName`/`rev` as the only place a fork's GitHub coordinates
   need to change (`flake.nix` + `packages/vast-provision.nix`'s function args)
-  — never hardcode a raw-URL elsewhere.
+  — never hardcode a raw-URL elsewhere. This includes manifest mode's `rawBase`,
+  which is derived from the same three args.
+- `DOCKERHUB_TOKEN` is intentionally **not** `VAST_`-prefixed — that prefix is
+  reserved for tokens `vast-account-vars-set` auto-syncs into every instance, and
+  this one must stay Mac-side/rent-time only. Don't "fix" it to match the pattern.
 - Update `README.md` for user-facing changes; CI (format + `nix flake check`)
   must pass.

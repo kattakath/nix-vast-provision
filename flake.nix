@@ -1,5 +1,5 @@
 {
-  description = "Nix flake — Vast.ai GPU-template provisioning toolkit for macOS: reconcile vastai/base-image templates via PROVISIONING_SCRIPT, validate provisioner repos, sync account-level secrets, and scaffold new provisioner repos from a generic template.";
+  description = "Nix flake — Vast.ai GPU-template provisioning toolkit for macOS: reconcile templates (legacy bash-engine, aggregator, or native-manifest mode) via PROVISIONING_SCRIPT, validate provisioner repos, sync account-level secrets, scaffold new provisioner repos, and rent instances with authenticated Docker Hub pulls.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -32,11 +32,15 @@
       # packages/vast-provision.nix's header comment for the callPackage override.
       orgName = "ismailkattakath";
       repoName = "nix-vast-provision";
+      # Cross-service handle used ONLY by vast-rent, as the Docker Hub username paired
+      # with the Keychain's DOCKERHUB_TOKEN for the per-instance image_login. Override
+      # via callPackage if you fork this and use a different Docker Hub account.
+      userName = "ismailkattakath";
 
       mkKit =
         pkgs:
         pkgs.callPackage ./packages/vast-provision.nix {
-          inherit orgName repoName;
+          inherit orgName repoName userName;
           # self.rev is only set when evaluated from a clean, committed git tree (e.g.
           # CI, or `nix run github:...`); a dirty/local checkout falls back to "main" so
           # local dev still evaluates (the generated PROVISIONING_SCRIPT URL just won't
@@ -50,6 +54,7 @@
         "vast-account-vars-set"
         "vast-ssh-key-set"
         "vast-init-repo"
+        "vast-rent"
       ];
     in
     {
@@ -66,6 +71,7 @@
           vast-account-vars-set = kit.account-vars-set;
           vast-ssh-key-set = kit.ssh-key-set;
           vast-init-repo = kit.init-repo;
+          vast-rent = kit.rent;
           default = kit.template-apply;
         }
       );

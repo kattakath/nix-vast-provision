@@ -4,8 +4,15 @@
 # instance-side scripts, wired as flake apps in flake.nix:
 #
 #   nix run .#vast-template-apply    — create/REPLACE (reconcile by name — delete+create)
-#                                      a Vast.ai template that boots via PROVISIONING_SCRIPT;
-#                                      gated by vast-repo-check unless --skip-check
+#                                      a Vast.ai template; three modes: legacy repo-mode
+#                                      (bash engine on vastai/base-image), aggregator mode
+#                                      (--repo + --workflow-name, native provisioner against
+#                                      a private aggregator repo), and manifest mode
+#                                      (--manifest + --workflow, native provisioner against
+#                                      a caller-supplied, rev-pinned manifest+workflow —
+#                                      override orgName/repoName/rev via callPackage to point
+#                                      at YOUR repo's committed manifest). Gated by
+#                                      vast-repo-check unless --skip-check.
 #   nix run .#vast-repo-check        — validate that a repo is a legit provisioner
 #                                      repo (structural: .provisioner-template.json
 #                                      marker + required files; forge-agnostic)
@@ -15,6 +22,10 @@
 #                                      account (idempotent)
 #   nix run .#vast-init-repo         — scaffold a provisioner repo from the baked
 #                                      templates/provisioner/ (GitHub or GitLab)
+#   nix run .#vast-rent              — rent a live BILLED instance from a template by
+#                                      name/hash, auto-selecting an on-demand offer;
+#                                      injects an authenticated Docker Hub image_login
+#                                      (DOCKERHUB_TOKEN) at create-time only
 #
 # Design (see the README): no custom image, no registry auth; PROVISIONING_SCRIPT ->
 # committed public bootstrap (pinned to a chosen flake rev) -> clone the target repo
@@ -25,9 +36,11 @@
 #
 # orgName/repoName/rev select WHICH repo's raw files the generated template's
 # PROVISIONING_SCRIPT points at (i.e. where vast-bootstrap.sh + provision-lib.sh are
-# fetched from at instance-boot time). They default to this flake's own GitHub
-# coordinates (see flake.nix) so the toolkit works out of the box — override them if
-# you forked this repo, e.g.:
+# fetched from at instance-boot time) — this ALSO governs manifest mode's rawBase
+# (where a --manifest/--workflow path resolves to). They default to this flake's own
+# GitHub coordinates (see flake.nix) so the toolkit works out of the box — override
+# them if you forked this repo, or if you want manifest mode to serve YOUR OWN
+# manifest+workflow files from your own repo instead of this one, e.g.:
 #   callPackage ./packages/vast-provision.nix {
 #     orgName = "your-org"; repoName = "your-fork"; rev = "abc123...";
 #   }
@@ -44,6 +57,7 @@
   shellcheck,
   orgName,
   repoName,
+  userName,
   rev,
 }:
 let
@@ -53,6 +67,11 @@ let
   bootstrapUrl = "https://raw.githubusercontent.com/${orgName}/${repoName}/${rev}/packages/vast-bootstrap.sh?v=${rev}";
   # The shared, never-false-positive engine, pinned to this rev; the bootstrap fetches it.
   libUrl = "https://raw.githubusercontent.com/${orgName}/${repoName}/${rev}/packages/templates/provisioner/provision-lib.sh";
+  # Pinned raw base for manifest-mode artifacts (a caller's own provisioning.yaml +
+  # workflow JSON, committed in THEIR repo) — vast-template-apply builds rev-pinned
+  # URLs against whatever --manifest/--workflow paths the caller passes. Governed by
+  # the same orgName/repoName/rev override as bootstrapUrl/libUrl above.
+  rawBase = "https://raw.githubusercontent.com/${orgName}/${repoName}/${rev}";
 
   # Validate that a repo is a legitimate provisioner repo — structurally (forge
   # provenance is asymmetric: GitHub has template_repository, GitLab has nothing),
@@ -153,6 +172,9 @@ let
       repo=""
       ref="main"
       entry="provision.sh"
+      manifest=""
+      workflow=""
+      wfname=""
       image=""
       disk=""
       host=""
@@ -165,48 +187,91 @@ let
           --repo) repo="''${2:?}"; shift 2 ;;
           --ref) ref="''${2:?}"; shift 2 ;;
           --entrypoint) entry="''${2:?}"; shift 2 ;;
+          --manifest) manifest="''${2:?}"; shift 2 ;;
+          --workflow) workflow="''${2:?}"; shift 2 ;;
+          --workflow-name) wfname="''${2:?}"; shift 2 ;;
           --image) image="''${2:?}"; shift 2 ;;
           --disk) disk="''${2:?}"; shift 2 ;;
           --dry-run) dryrun=1; shift ;;
           --skip-check) skipcheck=1; shift ;;
           -h | --help)
-            echo "usage: vast-template-apply --template-name NAME --repo [github:|gitlab:]owner/repo \\"
-            echo "         [--ref REF] [--entrypoint PATH] [--image IMG[:TAG]] [--disk GB] [--dry-run] [--skip-check]"
-            echo "Boots vastai/base-image (or --image) via PROVISIONING_SCRIPT -> bootstrap -> clone --repo@--ref -> run --entrypoint."
+            echo "usage: vast-template-apply --template-name NAME (--repo OWNER/REPO | --manifest PATH --workflow PATH) \\"
+            echo "  repo mode (legacy):  --repo [github:|gitlab:]owner/repo [--ref REF] [--entrypoint PATH]  (bash engine on vastai/base-image)"
+            echo "  aggregator mode:     --repo gitlab:owner/comfyui-workflows --workflow-name NAME  (native provisioner on vastai/comfy; private OK)"
+            echo "  manifest mode:       --manifest packages/…/provisioning.yaml --workflow packages/…/workflow.json  (native provisioner from a public URL)"
+            echo "  common:              [--image IMG[:TAG]] [--disk GB] [--dry-run] [--skip-check]"
             exit 0 ;;
           *) echo "vast-template-apply: unknown argument: $1" >&2; exit 1 ;;
         esac
       done
       [ -n "$name" ] || { echo "vast-template-apply: --template-name is required." >&2; exit 1; }
-      [ -n "$repo" ] || { echo "vast-template-apply: --repo is required." >&2; exit 1; }
-
-      host="github.com"
-      case "$repo" in
-        gitlab:*) host="gitlab.com"; repo="''${repo#gitlab:}" ;;
-        github:*) host="github.com"; repo="''${repo#github:}" ;;
-      esac
 
       pubkey_b64="$(base64 < "$HOME/.ssh/id_ed25519.pub" 2>/dev/null | tr -d '\n' || true)"
       # Fail LOUDLY rather than shipping an empty SSH_PUBKEY_B64 (a login-less instance).
       [ -n "$pubkey_b64" ] || { echo "vast-template-apply: ~/.ssh/id_ed25519.pub not found — cannot inject SSH_PUBKEY_B64" >&2; exit 1; }
 
-      [ -z "$image" ] && image="vastai/base-image"
-      case "$image" in *:*) tag="''${image##*:}"; image="''${image%:*}" ;; *) tag="cuda-12.6.3-auto" ;; esac
-      [ -z "$disk" ] && disk="64"
-
-      # runtype=args keeps the base image entrypoint intact (supervisord + Instance
-      # Portal + the /etc/vast_boot.d provisioning hook). OPEN_BUTTON_PORT=1111 renders
-      # the Open button; PORTAL_CONFIG lists apps; SSH_PUBKEY_B64 is planted for sshd.
+      # Two modes. Both use runtype=args (base image entrypoint intact: supervisord + Instance
+      # Portal + the /etc/vast_boot.d provisioning hook). OPEN_BUTTON_PORT=1111 renders the Open
+      # button; PORTAL_CONFIG lists apps; SSH_PUBKEY_B64 is planted for sshd.
       #
-      # PORTAL_CONFIG entry FORMAT: hostname:external_port:internal_port:/path:Name — external
-      # is the Caddy TLS+auth listen port Vast publishes; internal is the raw loopback the
-      # app binds. Two things are load-bearing, matching Vast's own stock templates verbatim:
-      #   1. The first entry MUST be named "Instance Portal" (case-insensitive substring
-      #      match in the portal backend) or the FastAPI backend on 127.0.0.1:11111 never
-      #      starts and the console Open button hangs on "Connecting..." forever.
-      #   2. The value MUST be double-quoted — Vast re-parses the stored template `env`
-      #      field shell-style, so an unquoted space truncates the value.
-      env_str="-e PROVISIONING_SCRIPT=${bootstrapUrl} -e PROVISION_LIB_URL=${libUrl} -e PROVISION_HOST=$host -e PROVISION_REPO=$repo -e PROVISION_REF=$ref -e PROVISION_ENTRYPOINT=$entry -e PROVISIONER_FAILURE_ACTION=stop -e PROVISION_MAX_SECONDS=5400 -e OPEN_BUTTON_PORT=1111 -e PORTAL_CONFIG=\"localhost:1111:11111:/:Instance Portal\" -e SSH_PUBKEY_B64=$pubkey_b64 -p 1111:1111 -p 22:22"
+      # PORTAL_CONFIG entry FORMAT: hostname:external_port:internal_port:/path:Name — external is the
+      # Caddy TLS+auth listen port Vast publishes (1111/8188, matched by the -p flags below); internal
+      # is the raw loopback the app binds (11111/18188, NEVER published). Two things are load-bearing,
+      # both matching Vast's own stock ComfyUI template verbatim:
+      #   1. The first entry MUST be named "Instance Portal". Each service's supervisor wrapper only
+      #      starts if its entry appears in /etc/portal.yaml (generated from these NAMES); the portal
+      #      backend's wrapper greps for the case-insensitive substring "instance portal", so a plain
+      #      "Portal" makes it SKIP launching the FastAPI backend on 127.0.0.1:11111 — Caddy on :1111
+      #      then 502s every request and the console Open button hangs on "Connecting..." forever.
+      #   2. The value MUST be double-quoted. Vast re-parses the stored template `env` field shell-style
+      #      (splitting on whitespace), so the SPACE in "Instance Portal" truncates an UNQUOTED value at
+      #      the space: the portal entry degrades to name "Instance" (still no match → 502) AND the
+      #      trailing "|...:ComfyUI" splits off as a stray token, dropping the ComfyUI entry too (comfyui
+      #      then also "Skipping ... not in /etc/portal.yaml" → :8188 dead). Quoting keeps it intact.
+      # (Root-caused from a live instance log + vast-ai/base-image source + Vast's stock comfy template.)
+      if [ -n "$manifest" ]; then
+        # MANIFEST MODE — Vast's NATIVE provisioner (PROVISIONING_MANIFEST) on the pre-baked
+        # vastai/comfy image (ComfyUI + venv + comfyui service already there). No bootstrap,
+        # no engine lib; the manifest + a rev-pinned WORKFLOW_URL drive everything. No repo to
+        # legitimacy-check. The manifest/workflow are committed in the repo orgName/repoName/rev
+        # point at (this flake's own by default — override via callPackage for your own repo).
+        [ -n "$workflow" ] || { echo "vast-template-apply: --workflow is required in manifest mode." >&2; exit 1; }
+        [ -z "$image" ] && image="vastai/comfy"
+        tag="v0.28.0-cuda-12.9-py312"
+        case "$image" in *:*) tag="''${image##*:}"; image="''${image%:*}" ;; esac
+        [ -z "$disk" ] && disk="100"
+        manifest_url="${rawBase}/$manifest?v=${rev}"
+        workflow_url="${rawBase}/$workflow?v=${rev}"
+        env_str="-e PROVISIONING_MANIFEST=$manifest_url -e WORKFLOW_URL=$workflow_url -e PROVISIONER_FAILURE_ACTION=stop -e OPEN_BUTTON_PORT=1111 -e PORTAL_CONFIG=\"localhost:1111:11111:/:Instance Portal|localhost:8188:18188:/:ComfyUI\" -e SSH_PUBKEY_B64=$pubkey_b64 -p 1111:1111 -p 8188:8188 -p 22:22"
+        skipcheck=1
+      else
+        # REPO MODE — the bootstrap clones a provisioner repo (public OR private, via
+        # GITLAB_TOKEN/GH_TOKEN) and runs its provision.sh. Two flavours:
+        #   * aggregator (--workflow-name): provision.sh runs Vast's NATIVE provisioner on the
+        #     named workflow's manifest, on the pre-baked vastai/comfy image (no bash engine).
+        #     This is how a PRIVATE workflow repo is provisioned — cloned with the token, manifest
+        #     run locally, so no public raw URL is needed.
+        #   * legacy (no --workflow-name): our bash engine (PROVISION_LIB_URL) on vastai/base-image.
+        [ -n "$repo" ] || { echo "vast-template-apply: --repo (or --manifest) is required." >&2; exit 1; }
+        host="github.com"
+        case "$repo" in
+          gitlab:*) host="gitlab.com"; repo="''${repo#gitlab:}" ;;
+          github:*) host="github.com"; repo="''${repo#github:}" ;;
+        esac
+        if [ -n "$wfname" ]; then
+          [ -z "$image" ] && image="vastai/comfy"
+          case "$image" in *:*) tag="''${image##*:}"; image="''${image%:*}" ;; *) tag="v0.28.0-cuda-12.9-py312" ;; esac
+          [ -z "$disk" ] && disk="100"
+          # No PROVISION_LIB_URL — the aggregator's provision.sh is self-contained (runs the
+          # native provisioner). WORKFLOW_NAME selects which workflow's manifest to run.
+          env_str="-e PROVISIONING_SCRIPT=${bootstrapUrl} -e PROVISION_HOST=$host -e PROVISION_REPO=$repo -e PROVISION_REF=$ref -e PROVISION_ENTRYPOINT=$entry -e WORKFLOW_NAME=$wfname -e PROVISIONER_FAILURE_ACTION=stop -e OPEN_BUTTON_PORT=1111 -e PORTAL_CONFIG=\"localhost:1111:11111:/:Instance Portal|localhost:8188:18188:/:ComfyUI\" -e SSH_PUBKEY_B64=$pubkey_b64 -p 1111:1111 -p 8188:8188 -p 22:22"
+        else
+          [ -z "$image" ] && image="vastai/base-image"
+          case "$image" in *:*) tag="''${image##*:}"; image="''${image%:*}" ;; *) tag="cuda-12.6.3-auto" ;; esac
+          [ -z "$disk" ] && disk="64"
+          env_str="-e PROVISIONING_SCRIPT=${bootstrapUrl} -e PROVISION_LIB_URL=${libUrl} -e PROVISION_HOST=$host -e PROVISION_REPO=$repo -e PROVISION_REF=$ref -e PROVISION_ENTRYPOINT=$entry -e PROVISIONER_FAILURE_ACTION=stop -e PROVISION_MAX_SECONDS=5400 -e OPEN_BUTTON_PORT=1111 -e PORTAL_CONFIG=\"localhost:1111:11111:/:Instance Portal|localhost:8188:18188:/:ComfyUI\" -e SSH_PUBKEY_B64=$pubkey_b64 -p 1111:1111 -p 8188:8188 -p 22:22"
+        fi
+      fi
 
       body="$(jq -n \
         --arg name "$name" --arg image "$image" --arg tag "$tag" \
@@ -459,6 +524,110 @@ let
     '';
   };
 
+  # Rent a Vast instance from one of our templates WITH authenticated Docker Hub
+  # registry login. Vast has NO account-level registry store and templates provably
+  # cannot carry credentials (the /template/ body keeps only docker_login_repo, not
+  # user/pass — verified against vast-python), so the Docker Hub PAT can
+  # ONLY ride the per-instance create call's `image_login`. This app is that single
+  # honest home: it reads DOCKERHUB_TOKEN from the Keychain and userName as the
+  # Docker Hub username, and injects `-u <user> -p <pat> docker.io` so the base-image
+  # pull uses OUR account rate budget instead of the shared-per-IP anonymous limit
+  # (whose exhaustion stalls the pull — layers stuck "Waiting", pull restarting).
+  rent = writeShellApplication {
+    name = "vast-rent";
+    runtimeInputs = [
+      curl
+      jq
+      coreutils
+    ];
+    text = ''
+      security=/usr/bin/security
+      account="$(id -un)"
+      apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
+      [ -n "$apikey" ] || { echo "vast-rent: VAST_API_KEY not in the login Keychain." >&2; exit 1; }
+      # Docker Hub PAT from the Keychain (optional but recommended); username = flake identity.
+      dhtoken="$("$security" find-generic-password -a "$account" -s DOCKERHUB_TOKEN -w 2>/dev/null || true)"
+      dhuser="${userName}"
+
+      tname=""; thash=""; offer=""; gpus="RTX 4090,RTX 5090"; disk="64"; maxprice=""; dryrun=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --template-name) tname="''${2:?}"; shift 2 ;;
+          --template-hash) thash="''${2:?}"; shift 2 ;;
+          --offer) offer="''${2:?}"; shift 2 ;;
+          --gpu) gpus="''${2:?}"; shift 2 ;;
+          --disk) disk="''${2:?}"; shift 2 ;;
+          --max-price) maxprice="''${2:?}"; shift 2 ;;
+          --dry-run) dryrun=1; shift ;;
+          -h | --help)
+            echo "usage: vast-rent (--template-name NAME | --template-hash HASH) \\"
+            echo "         [--offer ID] [--gpu \"RTX 4090,RTX 5090\"] [--disk GB] [--max-price DPH] [--dry-run]"
+            echo "Injects authenticated Docker Hub image_login (user=${userName}) from DOCKERHUB_TOKEN to beat pull rate limits."
+            exit 0 ;;
+          *) echo "vast-rent: unknown argument: $1" >&2; exit 1 ;;
+        esac
+      done
+
+      # Resolve the template hash by name among MY templates (filter by creator_id).
+      if [ -z "$thash" ]; then
+        [ -n "$tname" ] || { echo "vast-rent: --template-name or --template-hash is required." >&2; exit 1; }
+        myid="$(curl -fsS -H "Authorization: Bearer $apikey" "${api}/users/current/" 2>/dev/null | jq -r '.id // empty')"
+        [ -n "$myid" ] || { echo "vast-rent: could not resolve the Vast user id." >&2; exit 1; }
+        list="$(curl -fsS -G -H "Authorization: Bearer $apikey" "${api}/template/" \
+                 --data-urlencode 'select_cols=["*"]' \
+                 --data-urlencode "select_filters={\"creator_id\":{\"eq\":$myid}}" 2>/dev/null || true)"
+        thash="$(printf '%s' "$list" | jq -r --arg n "$tname" '(.templates // []) | map(select(.name==$n)) | (.[0].hash_id // empty)')"
+        [ -n "$thash" ] || { echo "vast-rent: no template named '$tname' on this account." >&2; exit 1; }
+      fi
+
+      # Auto-select an offer if none given: verified (secure cloud), rentable, matching
+      # GPU, enough disk + headroom, decent inet, high reliability, cheapest.
+      if [ -z "$offer" ]; then
+        gpujson="$(printf '%s' "$gpus" | jq -R 'split(",") | map(gsub("^ +| +$";""))')"
+        q="$(jq -n --argjson gpu "$gpujson" --argjson disk "$disk" \
+             '{q:{verified:{eq:true},rentable:{eq:true},gpu_name:{in:$gpu},num_gpus:{eq:1},
+                  disk_space:{gte:($disk+6)},inet_down:{gte:1000},order:[["dph_total","asc"]],type:"on-demand"}}')"
+        offers="$(printf '%s' "$q" | curl -fsS -X PUT "${api}/search/asks/" \
+                   -H "Authorization: Bearer $apikey" -H "Content-Type: application/json" --data @- 2>/dev/null || true)"
+        offer="$(printf '%s' "$offers" | jq -r --arg mp "$maxprice" '
+          (.offers // []) | map(select(.reliability2 >= 0.99))
+          | (if $mp != "" then map(select(.dph_total <= ($mp | tonumber))) else . end)
+          | sort_by(.dph_total) | (.[0].id // empty)')"
+        [ -n "$offer" ] || { echo "vast-rent: no matching offer (gpu=$gpus disk>=$disk)." >&2; exit 1; }
+        echo "vast-rent: selected offer $(printf '%s' "$offers" | jq -rc --argjson id "$offer" '(.offers // []) | map(select(.id==$id)) | .[0] | {id,gpu_name,dph_total,reliability2,inet_down,geolocation}')"
+      fi
+
+      # image_login rides ONLY the create call (no account/template cred store on Vast).
+      # Passed to jq via env ($ENV.LOGIN) and to curl via stdin, so the token never
+      # appears in any process's argv.
+      login=""
+      if [ -n "$dhtoken" ]; then
+        login="-u $dhuser -p $dhtoken docker.io"
+        echo "vast-rent: authenticated Docker Hub pull as '$dhuser'."
+      else
+        echo "vast-rent: WARN — no DOCKERHUB_TOKEN in the Keychain; anonymous pull may hit Docker Hub rate limits." >&2
+      fi
+      body="$(LOGIN="$login" jq -n --arg h "$thash" --argjson disk "$disk" \
+        '{template_hash_id: $h, disk: $disk} + (if ($ENV.LOGIN | length) > 0 then {image_login: $ENV.LOGIN} else {} end)')"
+
+      if [ -n "$dryrun" ]; then
+        echo "vast-rent: DRY RUN — would PUT ${api}/asks/$offer/ with body (login redacted):"
+        printf '%s\n' "$body" | jq '(.image_login) |= (if . then "-u '"$dhuser"' -p <redacted> docker.io" else . end)'
+        exit 0
+      fi
+
+      resp="$(printf '%s' "$body" | curl -fsS -X PUT "${api}/asks/$offer/" \
+               -H "Authorization: Bearer $apikey" -H "Content-Type: application/json" --data @- 2>/dev/null || true)"
+      if [ "$(printf '%s' "$resp" | jq -r '.success // false' 2>/dev/null)" = true ]; then
+        iid="$(printf '%s' "$resp" | jq -r '.new_contract // empty')"
+        echo "vast-rent: rented instance $iid (template $thash, offer $offer). Watch the Vast console Logs for the PROVISION-OUTCOME line."
+      else
+        echo "vast-rent: FAILED — $(printf '%s' "$resp" | jq -rc '{success, msg, error}' 2>/dev/null || printf '%s' "$resp")" >&2
+        exit 1
+      fi
+    '';
+  };
+
   # Lint the committed instance-side scripts at `nix flake check` (served as raw
   # files / fetched at boot, so they can't be writeShellApplications).
   scripts-lint =
@@ -481,6 +650,7 @@ in
     account-vars-set
     ssh-key-set
     init-repo
+    rent
     scripts-lint
     ;
 }

@@ -35,6 +35,11 @@ while your GitLab/HuggingFace/Civitai tokens stay out of it entirely.
     args to sync different ones).
   - `GH_TOKEN` / `GITLAB_TOKEN` — used locally by `vast-repo-check` (to read a
     private repo's marker file) and `vast-init-repo` (to create + push a new repo).
+  - `DOCKERHUB_TOKEN` — a Docker Hub personal access token, used **only** by
+    `vast-rent` at instance-create time (`image_login`) to beat anonymous pull
+    rate limits. Deliberately **not** prefixed `VAST_` — that prefix means "sync
+    to every instance via `vast-account-vars-set`," and this token must never go
+    there (it's Mac-side, rent-time only).
 - **`gh`/`git`** (GitHub) and/or **`glab`/`git`** (GitLab) on `PATH` if you use
   `vast-init-repo` — both are pulled in automatically as `runtimeInputs`, no
   separate install needed when run via `nix run`.
@@ -67,8 +72,10 @@ nix run .#vast-template-apply -- --help
 ### `vast-template-apply`
 
 Create or **replace** (reconcile by name — Vast's template `PUT` is broken
-server-side, so replace is delete-then-create) a Vast.ai template whose instances
-boot `vastai/base-image`, fetch the public
+server-side, so replace is delete-then-create) a Vast.ai template. Three modes,
+selected explicitly by flags — there's no auto-detection:
+
+**Legacy / repo mode** — instances boot `vastai/base-image`, fetch the public
 [`vast-bootstrap.sh`](./packages/vast-bootstrap.sh) via `PROVISIONING_SCRIPT`, clone
 your provisioner repo (public or private — token from an account variable), and run
 its `provision.sh`.
@@ -81,10 +88,46 @@ nix run .#vast-template-apply -- \
   [--disk 64] [--dry-run] [--skip-check]
 ```
 
+**Aggregator mode** (`--repo` + `--workflow-name`) — clones a **private**
+aggregator repo whose own self-contained `provision.sh` runs Vast's **native**
+`PROVISIONING_MANIFEST` provisioner locally (no bash engine at all), on the
+pre-baked `vastai/comfy` image, against the named workflow's manifest:
+
+```sh
+nix run .#vast-template-apply -- \
+  --template-name my-comfy-stack \
+  --repo gitlab:you/comfyui-workflows \
+  --workflow-name my-workflow
+```
+
+First-run caveat: aggregator mode does **not** auto-set `--skip-check` (unlike
+manifest mode below), so `vast-repo-check` runs against your private aggregator
+repo and may fail until it's a valid provisioner repo in its own right — pass
+`--skip-check` on first apply if needed.
+
+**Manifest mode** (`--manifest` + `--workflow`) — no repo clone, no bash engine:
+Vast's native provisioner runs directly against a rev-pinned manifest + workflow
+JSON committed in **your own repo**, not this one. Point `orgName`/`repoName`/`rev`
+at your repo via `callPackage` so the generated URLs resolve there:
+
+```nix
+callPackage ./packages/vast-provision.nix {
+  orgName = "you"; repoName = "your-repo"; rev = "<sha-or-main>";
+}
+```
+
+```sh
+nix run .#vast-template-apply -- \
+  --template-name my-comfy-stack \
+  --manifest path/to/your/provisioning.yaml \
+  --workflow path/to/your/workflow.json
+```
+
 `--repo` accepts `github:owner/repo` or `gitlab:owner/repo` (defaults to GitHub).
-By default the target repo is gated on `vast-repo-check` before the template is
-written; pass `--skip-check` to bypass. `--dry-run` prints the template body without
-calling the API.
+Repo-mode and aggregator-mode targets are gated on `vast-repo-check` before the
+template is written (pass `--skip-check` to bypass); manifest mode has no repo to
+check, so it sets `--skip-check` automatically. `--dry-run` prints the template
+body without calling the API, for any mode.
 
 ### `vast-repo-check`
 
@@ -135,6 +178,25 @@ nix run .#vast-init-repo -- --repo github:you/my-provisioner-repo [--public|--pr
 (`is_template`); GitLab has no per-repo equivalent — use group custom project
 templates instead.
 
+### `vast-rent`
+
+Rent a live, **BILLED** GPU instance from one of your templates. Resolves the
+template by name (or `--template-hash` directly) among your own templates,
+auto-selects a rentable on-demand offer if you don't pass `--offer` (verified,
+matching GPU, enough disk, reliability ≥0.99, decent inet, cheapest first), and —
+if `DOCKERHUB_TOKEN` is in the Keychain — injects an authenticated Docker Hub
+`image_login` at instance-create time, so the image pull uses your account's rate
+budget instead of the shared anonymous-per-IP limit.
+
+```sh
+nix run .#vast-rent -- \
+  --template-name my-stack \
+  [--offer ID] [--gpu "RTX 4090,RTX 5090"] [--disk 64] [--max-price 0.50] [--dry-run]
+```
+
+**This is the one command in this toolkit that spends real money.** Always
+`--dry-run` first.
+
 ## How it works
 
 1. **`PROVISIONING_SCRIPT` is the sole customization path** on `vastai/base-image`
@@ -156,6 +218,13 @@ templates instead.
    (marker file + required files) rather than provenance-based, since GitHub and
    GitLab expose template ancestry asymmetrically — this makes the check work
    identically on both forges.
+5. **Two provisioning engines, not just flag variations.** Legacy/repo mode uses
+   this toolkit's own bash bootstrap engine on `vastai/base-image`. Aggregator and
+   manifest modes instead hand off entirely to Vast's own **native**
+   `PROVISIONING_MANIFEST` provisioner on the pre-baked `vastai/comfy` image — no
+   bootstrap, no shared engine script, just a manifest (either fetched from a
+   rev-pinned URL, or run locally by a private aggregator repo's own
+   `provision.sh`). Pick whichever engine fits your stack.
 
 ## Used in production
 

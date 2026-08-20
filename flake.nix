@@ -2,6 +2,7 @@
   description = "Nix flake — Vast.ai GPU-template provisioning toolkit for macOS: reconcile templates (legacy bash-engine, aggregator, or native-manifest mode) via PROVISIONING_SCRIPT, validate provisioner repos, sync account-level secrets, scaffold new provisioner repos, and rent instances with authenticated Docker Hub pulls.";
 
   inputs = {
+    flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
@@ -13,18 +14,12 @@
   };
 
   outputs =
-    {
+    inputs@{
       self,
-      nixpkgs,
+      flake-parts,
+      ...
     }:
     let
-      inherit (nixpkgs) lib;
-      # macOS-only toolkit: every app shells out to /usr/bin/security (the login
-      # Keychain). NEVER add x86_64-darwin — nixpkgs-unstable dropped it, so
-      # `nix flake show --all-systems` throws.
-      darwinSystems = [ "aarch64-darwin" ];
-      forAll = systems: f: lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
-
       # Default coordinates for the raw-URL PROVISIONING_SCRIPT this toolkit generates
       # (i.e. which repo's packages/vast-bootstrap.sh + provision-lib.sh get fetched by
       # a Vast instance at first boot). Default to THIS flake's own GitHub repo, so the
@@ -57,54 +52,52 @@
         "vast-rent"
       ];
     in
-    {
-      # The CLIs, runnable via `nix run .#<name>` or wired into another flake's
-      # `packages`/`apps` (see the README's "Used in production" link).
-      packages = forAll darwinSystems (
-        _: pkgs:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      # macOS-only toolkit: every app shells out to /usr/bin/security (the login
+      # Keychain). NEVER add x86_64-darwin — nixpkgs-unstable dropped it, so
+      # `nix flake show --all-systems` throws.
+      systems = [ "aarch64-darwin" ];
+
+      perSystem =
+        { pkgs, system, ... }:
         let
           kit = mkKit pkgs;
         in
         {
-          vast-template-apply = kit.template-apply;
-          vast-repo-check = kit.repo-check;
-          vast-account-vars-set = kit.account-vars-set;
-          vast-ssh-key-set = kit.ssh-key-set;
-          vast-init-repo = kit.init-repo;
-          vast-rent = kit.rent;
-          default = kit.template-apply;
-        }
-      );
-
-      apps = forAll darwinSystems (
-        system: _:
-        lib.genAttrs appNames (name: {
-          type = "app";
-          program = "${self.packages.${system}.${name}}/bin/${name}";
-        })
-        // {
-          default = {
-            type = "app";
-            program = "${self.packages.${system}.vast-template-apply}/bin/vast-template-apply";
+          # The CLIs, runnable via `nix run .#<name>` or wired into another flake's
+          # `packages`/`apps` (see the README's "Used in production" link).
+          packages = {
+            vast-template-apply = kit.template-apply;
+            vast-repo-check = kit.repo-check;
+            vast-account-vars-set = kit.account-vars-set;
+            vast-ssh-key-set = kit.ssh-key-set;
+            vast-init-repo = kit.init-repo;
+            vast-rent = kit.rent;
+            default = kit.template-apply;
           };
-        }
-      );
 
-      # `nix flake check` BUILDS every writeShellApplication above (each build runs
-      # shellcheck) plus scripts-lint (shellchecks the committed instance-side scripts
-      # that can't be writeShellApplications, since they're served as raw files /
-      # fetched at instance-boot time) — proving the whole toolkit evaluates + lints.
-      checks = forAll darwinSystems (
-        system: pkgs:
-        let
-          kit = mkKit pkgs;
-        in
-        (lib.getAttrs appNames self.packages.${system})
-        // {
-          inherit (kit) scripts-lint;
-        }
-      );
+          apps =
+            pkgs.lib.genAttrs appNames (name: {
+              type = "app";
+              program = "${self.packages.${system}.${name}}/bin/${name}";
+            })
+            // {
+              default = {
+                type = "app";
+                program = "${self.packages.${system}.vast-template-apply}/bin/vast-template-apply";
+              };
+            };
 
-      formatter = forAll darwinSystems (_: pkgs: pkgs.nixfmt-rfc-style);
+          # `nix flake check` BUILDS every writeShellApplication above (each build runs
+          # shellcheck) plus scripts-lint (shellchecks the committed instance-side
+          # scripts that can't be writeShellApplications, since they're served as raw
+          # files / fetched at instance-boot time) — proving the whole toolkit
+          # evaluates + lints.
+          checks = (pkgs.lib.getAttrs appNames self.packages.${system}) // {
+            inherit (kit) scripts-lint;
+          };
+
+          formatter = pkgs.nixfmt-rfc-style;
+        };
     };
 }

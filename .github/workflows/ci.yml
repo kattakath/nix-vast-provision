@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # REQUIRED by the merge queue: a queue entry is built on its own
+  # `gh-readonly-queue/main/...` ref, which emits NEITHER `pull_request` NOR
+  # `push`. Without this trigger the required `checks` context never reports on a
+  # queued entry and every merge times out.
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}

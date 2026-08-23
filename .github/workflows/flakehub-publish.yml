@@ -30,6 +30,6 @@ jobs:
             experimental-features = nix-command flakes
       - uses: DeterminateSystems/flakehub-push@v6
         with:
-          name: ismailkattakath/nix-vast-provision
+          name: kattakath/nix-vast-provision
           visibility: public
           rolling: true

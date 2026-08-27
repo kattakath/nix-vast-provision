@@ -21,7 +21,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: cachix/cachix-action@v17
         with:
-          name: ismailkattakath
+          name: kattakath
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Formatting
         run: nix run nixpkgs#nixfmt-rfc-style -- --check $(find . -name '*.nix')

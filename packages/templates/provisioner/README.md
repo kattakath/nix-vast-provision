@@ -2,7 +2,7 @@
 
 Canonical **generic** template for Vast.ai provisioner-script repos consumed by the
 flake-based Vast.ai template provisioner
-([`nix-vast-provision`](https://github.com/ismailkattakath/nix-vast-provision)).
+([`nix-vast-provision`](https://github.com/kattakath/nix-vast-provision)).
 Create a new provisioner repo **from this template** (GitHub "Use this template" /
 GitLab custom project template — see `vast-init-repo`); it inherits the constant
 `provision.sh` entrypoint and the marker that `vast-repo-check` validates.

@@ -25,7 +25,7 @@
       # a Vast instance at first boot). Default to THIS flake's own GitHub repo, so the
       # toolkit works out of the box; override both if you forked it — see
       # packages/vast-provision.nix's header comment for the callPackage override.
-      orgName = "ismailkattakath";
+      orgName = "kattakath";
       repoName = "nix-vast-provision";
       # Cross-service handle used ONLY by vast-rent, as the Docker Hub username paired
       # with the Keychain's DOCKERHUB_TOKEN for the per-instance image_login. Override

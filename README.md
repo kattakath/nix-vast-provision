@@ -1,6 +1,6 @@
 # nix-vast-provision
 
-[![CI](https://github.com/ismailkattakath/nix-vast-provision/actions/workflows/ci.yml/badge.svg)](https://github.com/ismailkattakath/nix-vast-provision/actions/workflows/ci.yml)
+[![CI](https://github.com/kattakath/nix-vast-provision/actions/workflows/ci.yml/badge.svg)](https://github.com/kattakath/nix-vast-provision/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Built with Nix](https://img.shields.io/badge/built%20with-Nix-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
@@ -23,7 +23,7 @@ while your GitLab/HuggingFace/Civitai tokens stay out of it entirely.
 - **A [Vast.ai](https://vast.ai) account** with an API key.
 - **A secret store** — the login Keychain via `/usr/bin/security`, or any tool that
   can populate it (this repo doesn't ship one; see
-  [`nix-keychain-secrets`](https://github.com/ismailkattakath/nix-keychain-secrets)
+  [`nix-keychain-secrets`](https://github.com/kattakath/nix-keychain-secrets)
   for a `secret set KEY VALUE` CLI + every-shell loader that pairs well with it).
   Register these by convention (name is what each app looks up; `VAST_` variants
   are read-only tokens synced to Vast, the bare names are the Vast API key itself):
@@ -50,11 +50,11 @@ while your GitLab/HuggingFace/Civitai tokens stay out of it entirely.
 
 ```nix
 {
-  inputs.vast-provision.url = "github:ismailkattakath/nix-vast-provision";
+  inputs.vast-provision.url = "github:kattakath/nix-vast-provision";
 }
 ```
 
-Then either `nix run github:ismailkattakath/nix-vast-provision#<app>` directly, or
+Then either `nix run github:kattakath/nix-vast-provision#<app>` directly, or
 reference `vast-provision.packages.${system}.<name>` / `.apps.${system}.<name>`
 from your own flake (e.g. as a `packages`/`apps` passthrough — see "Used in
 production" below for a real example).
@@ -62,7 +62,7 @@ production" below for a real example).
 Run standalone from a clone of this repo:
 
 ```sh
-git clone https://github.com/ismailkattakath/nix-vast-provision.git
+git clone https://github.com/kattakath/nix-vast-provision.git
 cd nix-vast-provision
 nix run .#vast-template-apply -- --help
 ```

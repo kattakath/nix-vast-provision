@@ -210,7 +210,8 @@ let
       # Fail LOUDLY rather than shipping an empty SSH_PUBKEY_B64 (a login-less instance).
       [ -n "$pubkey_b64" ] || { echo "vast-template-apply: ~/.ssh/id_ed25519.pub not found — cannot inject SSH_PUBKEY_B64" >&2; exit 1; }
 
-      # Two modes. Both use runtype=args (base image entrypoint intact: supervisord + Instance
+      # Two branches below: manifest mode, and repo mode (which covers both the aggregator and
+      # legacy flavours). All use runtype=args (base image entrypoint intact: supervisord + Instance
       # Portal + the /etc/vast_boot.d provisioning hook). OPEN_BUTTON_PORT=1111 renders the Open
       # button; PORTAL_CONFIG lists apps; SSH_PUBKEY_B64 is planted for sshd.
       #

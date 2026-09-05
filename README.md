@@ -5,9 +5,9 @@
 [![Built with Nix](https://img.shields.io/badge/built%20with-Nix-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
 A declarative, all-Nix toolkit for provisioning [Vast.ai](https://vast.ai) GPU
-templates from `vastai/base-image`: reconcile a template by name, gate it on a
-structural legitimacy check of your provisioner repo, sync read-only tokens to
-Vast's account-level secret store, register your SSH key, and scaffold new
+templates (`vastai/base-image` or `vastai/comfy`): reconcile a template by name,
+gate it on a structural legitimacy check of your provisioner repo, sync read-only
+tokens to Vast's account-level secret store, register your SSH key, and scaffold new
 provisioner repos from a generic template — all as macOS `writeShellApplication`s
 you can `nix run` directly or wire into your own flake. No custom Docker image, no
 registry auth, and secrets never touch the template: Vast.ai's
@@ -229,9 +229,9 @@ nix run .#vast-rent -- \
 ## Used in production
 
 See it wired into a real fleet in
-**[kattakath/nix-config](https://github.com/kattakath/nix-config)** —
-[`packages/vast-provision.nix`](https://github.com/kattakath/nix-config/blob/main/packages/vast-provision.nix)
-is that repo's pre-extraction copy of this toolkit, and
+**[kattakath/nix-config](https://github.com/kattakath/nix-config)**, which consumes
+this repo as a flake input (`vast-provision.url = "github:kattakath/nix-vast-provision"`)
+and re-exports its CLIs as fleet apps, and whose
 [`docs/vastai-template-provisioning.md`](https://github.com/kattakath/nix-config/blob/main/docs/vastai-template-provisioning.md)
 documents the design this flake implements.
 

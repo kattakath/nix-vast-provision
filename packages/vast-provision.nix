@@ -348,17 +348,24 @@ let
       # Default set: GITLAB_TOKEN HF_TOKEN CIVITAI_TOKEN GH_TOKEN; pass NAMEs to
       # override. Values are never printed (only their lengths, as proof).
       #
-      # The Keychain entry and the Vast variable share ONE name. The former
-      # VAST_<NAME> convention is gone: it duplicated every credential just to
-      # mark intent, and the copies drifted out of existence (all four were
-      # missing by 2026-09-06, so this app silently synced nothing). Intent is
-      # now carried by the ARGUMENT LIST, which is the thing that actually
-      # decides what leaves the machine.
+      # NAMES ARE THE VAST VARIABLE NAMES, and they are load-bearing: the
+      # container reads GITLAB_TOKEN/GH_TOKEN (vast-bootstrap.sh clone auth,
+      # provision-lib.sh fetch_gitref) and CIVITAI_TOKEN/HF_TOKEN
+      # (provision-lib.sh fetch_civitai / HF downloads). Renaming one here
+      # silently breaks a download inside every instance, so don't.
       #
-      # So: anything you name here is pushed to every instance and is visible to
-      # the host operator. Name a token deliberately; there is no prefix left to
-      # catch a mistake. DOCKERHUB_TOKEN and VAST_API_KEY are Mac-side only and
-      # must never be passed.
+      # The KEYCHAIN SOURCE is looked up under the same name by default, and
+      # aliased only where the operator's canonical entry is spelled
+      # differently (below). The former VAST_<NAME> convention is gone: it
+      # duplicated EVERY credential just to mark intent, and the copies drifted
+      # out of existence (all four were missing by 2026-09-06, so this app
+      # silently synced nothing). An alias for the two that genuinely differ is
+      # not that: it reuses the general token instead of demanding a second copy.
+      #
+      # Intent is carried by the ARGUMENT LIST, which is the thing that actually
+      # decides what leaves the machine. Anything you name here is pushed to
+      # every instance and is visible to the host operator. DOCKERHUB_TOKEN and
+      # VAST_API_KEY are Mac-side only and must never be passed.
       security=/usr/bin/security
       account="$(id -un)"
       apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
@@ -374,9 +381,16 @@ let
 
       rc=0
       for name in "''${names[@]}"; do
-        val="$("$security" find-generic-password -a "$account" -s "$name" -w 2>/dev/null || true)"
+        # Keychain entry backing this Vast variable. Same name unless the
+        # operator's canonical entry is spelled differently.
+        case "$name" in
+          CIVITAI_TOKEN) src=CIVITAI_API_TOKEN ;;
+          GH_TOKEN)      src=GITHUB_PERSONAL_ACCESS_TOKEN ;;
+          *)             src="$name" ;;
+        esac
+        val="$("$security" find-generic-password -a "$account" -s "$src" -w 2>/dev/null || true)"
         if [ -z "$val" ]; then
-          echo "$name: SKIP (Keychain $name missing — 'secret set $name <value>')"; rc=1; continue
+          echo "$name: SKIP (Keychain $src missing — 'secret set $src <value>')"; rc=1; continue
         fi
         body="$(val="$val" jq -n --arg k "$name" '{key: $k, value: env.val}')"
         resp="$(printf '%s' "$body" | curl -fsS -X POST "${api}/secrets/" \
@@ -386,7 +400,11 @@ let
                    -H "Authorization: Bearer $apikey" -H "Content-Type: application/json" --data @- 2>/dev/null || true)"
         fi
         if [ "$(printf '%s' "$resp" | jq -r '.success // false' 2>/dev/null)" = true ]; then
-          echo "$name: set on Vast (value length ''${#val})"
+          if [ "$src" = "$name" ]; then
+            echo "$name: set on Vast (value length ''${#val})"
+          else
+            echo "$name: set on Vast from Keychain $src (value length ''${#val})"
+          fi
         else
           echo "$name: FAILED ($(printf '%s' "$resp" | jq -rc '{msg, error}' 2>/dev/null || true))"; rc=1
         fi

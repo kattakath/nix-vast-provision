@@ -29,21 +29,37 @@ while your GitLab/HuggingFace/Civitai tokens stay out of it entirely.
   one name**; there are no `VAST_`-prefixed duplicates:
   - `VAST_API_KEY` — your Vast.ai API key (required by every app except
     `vast-repo-check`/`vast-init-repo`). Mac-side only; never synced.
-  - `GITLAB_TOKEN`, `HF_TOKEN`, `CIVITAI_TOKEN`, `GH_TOKEN` — `vast-account-vars-set`'s
-    default set, pushed to Vast under the same names. `GH_TOKEN`/`GITLAB_TOKEN` are
-    *also* what `vast-repo-check` (read a private repo's marker file) and
-    `vast-init-repo` (create + push a new repo) use locally — one entry, both uses.
+  - `GITLAB_TOKEN`, `HF_TOKEN`, `CIVITAI_API_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN` —
+    the entries backing `vast-account-vars-set`'s default set. The **Vast variable
+    names** it pushes are `GITLAB_TOKEN`, `HF_TOKEN`, `CIVITAI_TOKEN`, `GH_TOKEN` —
+    those are fixed, because the container reads them (`vast-bootstrap.sh` clone
+    auth, `provision-lib.sh` civitai/HF fetches). Two are read from a
+    differently-spelled entry:
+
+    | Vast variable (fixed) | Keychain entry read |
+    |---|---|
+    | `GITLAB_TOKEN` | `GITLAB_TOKEN` |
+    | `HF_TOKEN` | `HF_TOKEN` |
+    | `CIVITAI_TOKEN` | `CIVITAI_API_TOKEN` |
+    | `GH_TOKEN` | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+
+    `GITLAB_TOKEN` and `GITHUB_PERSONAL_ACCESS_TOKEN` are *also* what
+    `vast-repo-check` (read a private repo's marker file) and `vast-init-repo`
+    (create + push a new repo) use locally — one entry, both uses.
   - `DOCKERHUB_TOKEN` — a Docker Hub personal access token, used **only** by
     `vast-rent` at instance-create time (`image_login`) to beat anonymous pull
     rate limits. Mac-side, rent-time only — never pass it to
     `vast-account-vars-set`.
 
   > **The prefix is gone, and with it the training wheel.** `VAST_<NAME>` used to
-  > mark "safe to sync"; it duplicated every credential to encode intent, and the
+  > mark "safe to sync"; it duplicated *every* credential to encode intent, and the
   > duplicates rotted — by 2026-09-06 all four were missing and this app synced
-  > nothing while reporting only SKIPs. Intent now lives in the argument list.
-  > **Whatever you name is pushed to every instance and is readable by the host
-  > operator, so scope those tokens read-only.**
+  > nothing while reporting only SKIPs. The alias table above is not a return to
+  > that: it reuses the general token for the two whose canonical entry is spelled
+  > differently, rather than demanding a second copy of anything.
+  >
+  > Intent now lives in the argument list. **Whatever you name is pushed to every
+  > instance and is readable by the host operator, so scope those tokens read-only.**
 - **`gh`/`git`** (GitHub) and/or **`glab`/`git`** (GitLab) on `PATH` if you use
   `vast-init-repo` — both are pulled in automatically as `runtimeInputs`, no
   separate install needed when run via `nix run`.

@@ -110,11 +110,11 @@ let
         local path="$1" tok
         case "$host" in
           github.com)
-            tok="$("$security" find-generic-password -a "$account" -s GH_TOKEN -w 2>/dev/null || true)"
+            tok="$("$security" find-generic-password -a "$account" -s gh:github.com:pat -w 2>/dev/null || true)"
             curl -fsSL -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github.raw+json" \
               "https://api.github.com/repos/$repo/contents/$path?ref=$ref" ;;
           gitlab.com)
-            tok="$("$security" find-generic-password -a "$account" -s GITLAB_TOKEN -w 2>/dev/null || true)"
+            tok="$("$security" find-generic-password -a "$account" -s glab:gitlab.com:token -w 2>/dev/null || true)"
             local enc pe
             enc="$(printf '%s' "$repo" | sed 's|/|%2F|g')"
             pe="$(printf '%s' "$path" | sed 's|/|%2F|g')"
@@ -162,7 +162,7 @@ let
       # Gated by vast-repo-check (skip with --skip-check). No secrets in the template.
       security=/usr/bin/security
       account="$(id -un)"
-      apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
+      apikey="$("$security" find-generic-password -a "$account" -s vast:vast.ai:api -w 2>/dev/null || true)"
       if [ -z "$apikey" ]; then
         echo "vast-template-apply: VAST_API_KEY not in the login Keychain (see README: 'secret set VAST_API_KEY')." >&2
         exit 1
@@ -368,7 +368,7 @@ let
       # VAST_API_KEY are Mac-side only and must never be passed.
       security=/usr/bin/security
       account="$(id -un)"
-      apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
+      apikey="$("$security" find-generic-password -a "$account" -s vast:vast.ai:api -w 2>/dev/null || true)"
       if [ -z "$apikey" ]; then
         echo "vast-account-vars-set: VAST_API_KEY not in the login Keychain." >&2
         exit 1
@@ -384,8 +384,10 @@ let
         # Keychain entry backing this Vast variable. Same name unless the
         # operator's canonical entry is spelled differently.
         case "$name" in
-          CIVITAI_TOKEN) src=CIVITAI_API_TOKEN ;;
-          GH_TOKEN)      src=GITHUB_PERSONAL_ACCESS_TOKEN ;;
+          GITLAB_TOKEN)  src=glab:gitlab.com:token ;;
+          HF_TOKEN)      src=huggingface.co:read ;;
+          CIVITAI_TOKEN) src=civitai.com:api ;;
+          GH_TOKEN)      src=gh:github.com:pat ;;
           *)             src="$name" ;;
         esac
         val="$("$security" find-generic-password -a "$account" -s "$src" -w 2>/dev/null || true)"
@@ -430,7 +432,7 @@ let
     text = ''
       security=/usr/bin/security
       account="$(id -un)"
-      apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
+      apikey="$("$security" find-generic-password -a "$account" -s vast:vast.ai:api -w 2>/dev/null || true)"
       if [ -z "$apikey" ]; then
         echo "vast-ssh-key-set: VAST_API_KEY not in the login Keychain." >&2
         exit 1
@@ -522,7 +524,7 @@ let
 
       case "$host" in
         github.com)
-          ghtok="$("$security" find-generic-password -a "$account" -s GH_TOKEN -w 2>/dev/null || true)"
+          ghtok="$("$security" find-generic-password -a "$account" -s gh:github.com:pat -w 2>/dev/null || true)"
           [ -n "$ghtok" ] || { echo "vast-init-repo: GH_TOKEN not in Keychain." >&2; exit 1; }
           export GH_TOKEN="$ghtok"
           echo "vast-init-repo: creating github.com/$repo ($vis)"
@@ -537,7 +539,7 @@ let
           echo "vast-init-repo: done -> https://github.com/$repo"
           ;;
         gitlab.com)
-          gltok="$("$security" find-generic-password -a "$account" -s GITLAB_TOKEN -w 2>/dev/null || true)"
+          gltok="$("$security" find-generic-password -a "$account" -s glab:gitlab.com:token -w 2>/dev/null || true)"
           [ -n "$gltok" ] || { echo "vast-init-repo: GITLAB_TOKEN not in Keychain." >&2; exit 1; }
           export GITLAB_TOKEN="$gltok"
           gvis="private"
@@ -574,7 +576,7 @@ let
     text = ''
       security=/usr/bin/security
       account="$(id -un)"
-      apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
+      apikey="$("$security" find-generic-password -a "$account" -s vast:vast.ai:api -w 2>/dev/null || true)"
       [ -n "$apikey" ] || { echo "vast-rent: VAST_API_KEY not in the login Keychain." >&2; exit 1; }
       # Docker Hub PAT from the Keychain (optional but recommended); username = flake identity.
       dhtoken="$("$security" find-generic-password -a "$account" -s DOCKERHUB_TOKEN -w 2>/dev/null || true)"

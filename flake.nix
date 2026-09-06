@@ -4,6 +4,8 @@
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
+    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   nixConfig = {
@@ -53,6 +55,8 @@
       ];
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ inputs.treefmt-nix.flakeModule ];
+
       # macOS-only toolkit: every app shells out to /usr/bin/security (the login
       # Keychain). NEVER add x86_64-darwin — nixpkgs-unstable dropped it, so
       # `nix flake show --all-systems` throws.
@@ -97,7 +101,17 @@
             inherit (kit) scripts-lint;
           };
 
-          formatter = pkgs.nixfmt-rfc-style;
+          # treefmt owns `nix fmt` and contributes its own `checks.treefmt`, so CI
+          # formatting is gated by THIS flake's lock rather than the runner's
+          # registry. Bare nixfmt as the formatter is a trap: `nix fmt` hands it
+          # every file in the tree, including README.md and LICENSE, which it
+          # cannot parse.
+          treefmt = {
+            projectRootFile = "flake.nix";
+            programs.nixfmt.enable = true;
+            programs.deadnix.enable = true;
+            programs.statix.enable = true;
+          };
         };
     };
 }

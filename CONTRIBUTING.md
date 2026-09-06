@@ -6,8 +6,8 @@ the most welcome.
 ## Dev loop
 
 ```sh
-nix flake check -L                       # build every CLI (shellcheck) + scripts-lint
-nix run nixpkgs#nixfmt-rfc-style -- .    # format all .nix (CI enforces this)
+nix flake check -L    # build every CLI (shellcheck) + scripts-lint + treefmt
+nix fmt               # treefmt: nixfmt + deadnix + statix (checks.treefmt gates it)
 nix build .#packages.aarch64-darwin.vast-template-apply
 ```
 
@@ -29,5 +29,5 @@ nix build .#packages.aarch64-darwin.vast-template-apply
 - `DOCKERHUB_TOKEN` is intentionally **not** `VAST_`-prefixed — that prefix is
   reserved for tokens `vast-account-vars-set` auto-syncs into every instance, and
   this one must stay Mac-side/rent-time only. Don't "fix" it to match the pattern.
-- Update `README.md` for user-facing changes; CI (format + `nix flake check`)
-  must pass.
+- Update `README.md` for user-facing changes; CI (`nix flake check`, which now
+  carries the formatting gate as `checks.treefmt`) must pass.

@@ -16,8 +16,8 @@
 #   nix run .#vast-repo-check        — validate that a repo is a legit provisioner
 #                                      repo (structural: .provisioner-template.json
 #                                      marker + required files; forge-agnostic)
-#   nix run .#vast-account-vars-set  — sync read-only VAST_* Keychain tokens to Vast
-#                                      ACCOUNT-level env vars
+#   nix run .#vast-account-vars-set  — sync read-only Keychain tokens to Vast
+#                                      ACCOUNT-level env vars (same name both sides)
 #   nix run .#vast-ssh-key-set       — register the operator SSH public key on the Vast
 #                                      account (idempotent)
 #   nix run .#vast-init-repo         — scaffold a provisioner repo from the baked
@@ -30,8 +30,8 @@
 # Design (see the README): no custom image, no registry auth; PROVISIONING_SCRIPT ->
 # committed public bootstrap (pinned to a chosen flake rev) -> clone the target repo
 # (public/private, token from account vars) -> run its constant, self-contained
-# provision.sh. Secrets NEVER touch the template. macOS-only: VAST_API_KEY + VAST_*
-# tokens live in the login Keychain (`/usr/bin/security`); curl/jq pinned via
+# provision.sh. Secrets NEVER touch the template. macOS-only: VAST_API_KEY plus the
+# synced tokens live in the login Keychain (`/usr/bin/security`); curl/jq pinned via
 # runtimeInputs.
 #
 # orgName/repoName/rev select WHICH repo's raw files the generated template's
@@ -343,10 +343,22 @@ let
       coreutils
     ];
     text = ''
-      # Sync read-only tokens from the login Keychain (VAST_<NAME>) to Vast.ai
+      # Sync read-only tokens from the login Keychain (<NAME>) to Vast.ai
       # ACCOUNT-level environment variables (<NAME>), injected into every instance.
       # Default set: GITLAB_TOKEN HF_TOKEN CIVITAI_TOKEN GH_TOKEN; pass NAMEs to
       # override. Values are never printed (only their lengths, as proof).
+      #
+      # The Keychain entry and the Vast variable share ONE name. The former
+      # VAST_<NAME> convention is gone: it duplicated every credential just to
+      # mark intent, and the copies drifted out of existence (all four were
+      # missing by 2026-09-06, so this app silently synced nothing). Intent is
+      # now carried by the ARGUMENT LIST, which is the thing that actually
+      # decides what leaves the machine.
+      #
+      # So: anything you name here is pushed to every instance and is visible to
+      # the host operator. Name a token deliberately; there is no prefix left to
+      # catch a mistake. DOCKERHUB_TOKEN and VAST_API_KEY are Mac-side only and
+      # must never be passed.
       security=/usr/bin/security
       account="$(id -un)"
       apikey="$("$security" find-generic-password -a "$account" -s VAST_API_KEY -w 2>/dev/null || true)"
@@ -362,9 +374,9 @@ let
 
       rc=0
       for name in "''${names[@]}"; do
-        val="$("$security" find-generic-password -a "$account" -s "VAST_$name" -w 2>/dev/null || true)"
+        val="$("$security" find-generic-password -a "$account" -s "$name" -w 2>/dev/null || true)"
         if [ -z "$val" ]; then
-          echo "$name: SKIP (Keychain VAST_$name missing)"; rc=1; continue
+          echo "$name: SKIP (Keychain $name missing — 'secret set $name <value>')"; rc=1; continue
         fi
         body="$(val="$val" jq -n --arg k "$name" '{key: $k, value: env.val}')"
         resp="$(printf '%s' "$body" | curl -fsS -X POST "${api}/secrets/" \

@@ -16,7 +16,7 @@ nix build .#packages.aarch64-darwin.vast-template-apply
 - The CLIs stay POSIX-ish shell in `writeShellApplication` (shellcheck-clean
   under `set -euo pipefail`).
 - No secret **values** in code, ever — the Keychain is the only store; git/Nix
-  hold neither. `VAST_*` **names** are just a documented convention, fine to
+  hold neither. Keychain **names** are just a documented convention, fine to
   reference.
 - `packages/vast-bootstrap.sh` and `packages/templates/provisioner/*.sh` are
   fetched raw / cloned at Vast instance-boot time, so they stay plain shell
@@ -26,8 +26,10 @@ nix build .#packages.aarch64-darwin.vast-template-apply
   need to change (`flake.nix` + `packages/vast-provision.nix`'s function args)
   — never hardcode a raw-URL elsewhere. This includes manifest mode's `rawBase`,
   which is derived from the same three args.
-- `DOCKERHUB_TOKEN` is intentionally **not** `VAST_`-prefixed — that prefix is
-  reserved for tokens `vast-account-vars-set` auto-syncs into every instance, and
-  this one must stay Mac-side/rent-time only. Don't "fix" it to match the pattern.
+- `DOCKERHUB_TOKEN` and `VAST_API_KEY` are **Mac-side only** and must never be
+  passed to `vast-account-vars-set`. There is no naming convention enforcing that
+  any more (the `VAST_<NAME>` sync-marker prefix was removed — it duplicated every
+  credential to encode intent and the copies rotted away unnoticed). The default
+  argument list is the only guard, so don't widen it casually.
 - Update `README.md` for user-facing changes; CI (`nix flake check`, which now
   carries the formatting gate as `checks.treefmt`) must pass.

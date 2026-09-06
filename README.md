@@ -25,21 +25,25 @@ while your GitLab/HuggingFace/Civitai tokens stay out of it entirely.
   can populate it (this repo doesn't ship one; see
   [`nix-keychain-secrets`](https://github.com/kattakath/nix-keychain-secrets)
   for a `secret set KEY VALUE` CLI + every-shell loader that pairs well with it).
-  Register these by convention (name is what each app looks up; `VAST_` variants
-  are read-only tokens synced to Vast, the bare names are the Vast API key itself):
+  Register these by convention — **the Keychain entry and the Vast variable share
+  one name**; there are no `VAST_`-prefixed duplicates:
   - `VAST_API_KEY` — your Vast.ai API key (required by every app except
-    `vast-repo-check`/`vast-init-repo`).
-  - `VAST_GITLAB_TOKEN`, `VAST_HF_TOKEN`, `VAST_CIVITAI_TOKEN`, `VAST_GH_TOKEN` —
-    read-only tokens `vast-account-vars-set` pushes to Vast as `GITLAB_TOKEN`,
-    `HF_TOKEN`, `CIVITAI_TOKEN`, `GH_TOKEN` (its default set; pass other names as
-    args to sync different ones).
-  - `GH_TOKEN` / `GITLAB_TOKEN` — used locally by `vast-repo-check` (to read a
-    private repo's marker file) and `vast-init-repo` (to create + push a new repo).
+    `vast-repo-check`/`vast-init-repo`). Mac-side only; never synced.
+  - `GITLAB_TOKEN`, `HF_TOKEN`, `CIVITAI_TOKEN`, `GH_TOKEN` — `vast-account-vars-set`'s
+    default set, pushed to Vast under the same names. `GH_TOKEN`/`GITLAB_TOKEN` are
+    *also* what `vast-repo-check` (read a private repo's marker file) and
+    `vast-init-repo` (create + push a new repo) use locally — one entry, both uses.
   - `DOCKERHUB_TOKEN` — a Docker Hub personal access token, used **only** by
     `vast-rent` at instance-create time (`image_login`) to beat anonymous pull
-    rate limits. Deliberately **not** prefixed `VAST_` — that prefix means "sync
-    to every instance via `vast-account-vars-set`," and this token must never go
-    there (it's Mac-side, rent-time only).
+    rate limits. Mac-side, rent-time only — never pass it to
+    `vast-account-vars-set`.
+
+  > **The prefix is gone, and with it the training wheel.** `VAST_<NAME>` used to
+  > mark "safe to sync"; it duplicated every credential to encode intent, and the
+  > duplicates rotted — by 2026-09-06 all four were missing and this app synced
+  > nothing while reporting only SKIPs. Intent now lives in the argument list.
+  > **Whatever you name is pushed to every instance and is readable by the host
+  > operator, so scope those tokens read-only.**
 - **`gh`/`git`** (GitHub) and/or **`glab`/`git`** (GitLab) on `PATH` if you use
   `vast-init-repo` — both are pulled in automatically as `runtimeInputs`, no
   separate install needed when run via `nix run`.
@@ -143,7 +147,7 @@ nix run .#vast-repo-check -- --repo github:you/my-provisioner-repo [--ref main]
 
 ### `vast-account-vars-set`
 
-Sync read-only tokens from the login Keychain (`VAST_<NAME>`) to Vast.ai
+Sync read-only tokens from the login Keychain (`<NAME>`) to Vast.ai
 **account-level** environment variables (`<NAME>`), which Vast injects into every
 instance you launch regardless of template.
 

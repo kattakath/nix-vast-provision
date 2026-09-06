@@ -7,8 +7,11 @@
 marked public, to anyone). Instead:
 
 - **Source of truth on the Mac:** the login Keychain (`VAST_API_KEY`,
-  `VAST_GITLAB_TOKEN`, `VAST_HF_TOKEN`, `VAST_CIVITAI_TOKEN`, `VAST_GH_TOKEN`,
-  ...), read via `/usr/bin/security find-generic-password`. `vast-template-apply`
+  `GITLAB_TOKEN`, `HF_TOKEN`, `CIVITAI_TOKEN`, `GH_TOKEN`, ...), read via
+  `/usr/bin/security find-generic-password`. The Keychain entry and the Vast
+  variable share one name — there is no `VAST_`-prefixed copy, and therefore no
+  prefix to signal "safe to sync". **What you pass to `vast-account-vars-set` is
+  what leaves the machine**, so keep those tokens read-only. `vast-template-apply`
   and friends never print a token value — only lengths, as round-trip proof.
 - **Delivery to instances:** `vast-account-vars-set` pushes those Keychain
   values to Vast.ai **account-level** environment variables (`POST/PUT
